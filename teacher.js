@@ -1,42 +1,45 @@
 'use strict';
 
-const STORAGE_KEY = 'team-roles-teacher-v1';
+const STORAGE_KEY = 'team-roles-teacher-v2';
 const POLL_MS = 5000;
 
 const app = document.getElementById('app');
 
-// Группа учителя: код и ключ. Ключ лежит и в адресе страницы (#КОД.ключ), поэтому
-// страницу можно открыть на другом устройстве — например, на компьютере с проектором.
-let group = fromHash() || loadGroup();
+// Код учителя — единственный доступ к его группам. Браузер его помнит, на другом устройстве
+// учитель вводит код сам. В адресе страницы только код группы (#КОД), он не секретный:
+// ссылку на эту страницу можно пересылать коллегам — своих групп они не увидят.
+let teacher = loadTeacher();
+let freshTeacher = false;
+let groups = null;
 let view = null;
 let problem = null;
+let loginProblem = null;
 let busy = false;
 let pollRun = 0;
 
-function fromHash() {
-  const [code, key] = location.hash.slice(1).split('.');
-  return code && key ? { code: code.toUpperCase(), key } : null;
-}
+const openCode = () => location.hash.slice(1).toUpperCase() || null;
 
-function loadGroup() {
+function loadTeacher() {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY));
+    return localStorage.getItem(STORAGE_KEY);
   } catch {
     return null;
   }
 }
 
-function saveGroup() {
+function saveTeacher() {
   try {
-    if (group) localStorage.setItem(STORAGE_KEY, JSON.stringify(group));
+    if (teacher) localStorage.setItem(STORAGE_KEY, teacher);
     else localStorage.removeItem(STORAGE_KEY);
   } catch {
-    // Без localStorage группа держится в адресе страницы.
+    // Без localStorage код живёт до закрытия вкладки.
   }
-  history.replaceState(null, '', group ? `#${group.code}.${group.key}` : location.pathname);
 }
 
-const studentLink = () => new URL(`./?g=${group.code}`, location.href).href;
+// Так же код нормализует бэкенд: регистр, «ё» и разделители не важны.
+const normalizeTeacher = value => value.toLowerCase().replace(/ё/g, 'е').split(/[^a-zа-я0-9]+/).filter(Boolean).join('-');
+
+const studentLink = code => new URL(`./?g=${code}`, location.href).href;
 
 function qrSvg(text) {
   const qr = qrcode(0, 'M');
@@ -45,33 +48,22 @@ function qrSvg(text) {
   return qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true, alt: 'QR-код со ссылкой на тест' });
 }
 
+const formatDate = time => new Date(time).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+const notice = () => (problem ? `<p class="notice">${escapeHtml(problem)}</p>` : '');
+
 function render() {
-  if (!group) {
+  pollRun++;
+  view = null;
+  if (!teacher) {
     renderStart();
-    return;
+  } else if (openCode()) {
+    renderGroup();
+    poll();
+  } else {
+    renderGroups();
+    loadGroups();
   }
-  app.innerHTML = `
-    <section>
-      <p class="eyebrow">Учителю</p>
-      <h1>Группа ${escapeHtml(group.code)}</h1>
-      <p class="lead">Покажите ученикам QR-код. Они пройдут тест, а&nbsp;вы соберёте из&nbsp;них команды.</p>
-
-      <div class="card invite">
-        <div class="qr">${qrSvg(studentLink())}</div>
-        <div class="invite-text">
-          <p>Наведите камеру телефона на&nbsp;код или откройте ссылку:</p>
-          <p class="invite-link">${escapeHtml(studentLink())}</p>
-          <button type="button" class="button button-plain" data-action="copy">Скопировать ссылку</button>
-        </div>
-      </div>
-
-      <div id="live"></div>
-
-      <div class="actions">
-        <button type="button" class="button button-plain" data-action="new">Новая группа</button>
-      </div>
-    </section>`;
-  renderLive();
+  window.scrollTo(0, 0);
 }
 
 function renderStart() {
@@ -93,8 +85,96 @@ function renderStart() {
       <div class="actions">
         <button type="button" class="button" data-action="create"${busy ? ' disabled' : ''}>Создать группу</button>
       </div>
-      ${problem ? `<p class="notice">${escapeHtml(problem)}</p>` : ''}
+      ${notice()}
+
+      <form class="card login" id="login">
+        <h2>Уже создавали группы?</h2>
+        <p>Введите код учителя — сайт выдал его вместе с&nbsp;первой группой.</p>
+        <label class="field">
+          <span>Код учителя</span>
+          <input name="teacher" type="text" placeholder="лиса-окно-гора-42" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </label>
+        ${loginProblem ? `<p class="notice">${escapeHtml(loginProblem)}</p>` : ''}
+        <div class="actions">
+          <button type="submit" class="button"${busy ? ' disabled' : ''}>Открыть мои группы</button>
+        </div>
+      </form>
     </section>`;
+}
+
+function renderGroups() {
+  app.innerHTML = `
+    <section>
+      <p class="eyebrow">Учителю</p>
+      <h1>Ваши группы</h1>
+      <div class="actions">
+        <button type="button" class="button" data-action="create"${busy ? ' disabled' : ''}>Создать группу</button>
+      </div>
+      ${notice()}
+      <div id="groups"></div>
+      ${renderTeacherCode()}
+    </section>`;
+  renderGroupList();
+}
+
+function renderGroupList() {
+  const box = document.getElementById('groups');
+  if (!box) return;
+  if (!groups) {
+    box.innerHTML = problem ? '' : '<p class="notice">Загружаем группы…</p>';
+    return;
+  }
+  box.innerHTML = groups.length
+    ? `<ul class="card people group-list">
+        ${groups.map(group => `
+          <li>
+            <a href="#${escapeHtml(group.code)}">
+              <span><strong>Группа ${escapeHtml(group.code)}</strong><small>${formatDate(group.created)}</small></span>
+              <span class="status${group.distributed ? ' is-done' : ''}">${group.distributed
+                ? 'команды собраны'
+                : group.members ? `прошли ${group.finished} из&nbsp;${group.members}` : 'пока никого'}</span>
+            </a>
+          </li>`).join('')}
+      </ul>`
+    : '<p class="notice">Пока нет групп. Группы хранятся 30&nbsp;дней.</p>';
+}
+
+function renderTeacherCode() {
+  return `
+    <div class="card teacher-code${freshTeacher ? ' is-fresh' : ''}">
+      <p class="team-label">${freshTeacher ? 'Запишите код учителя' : 'Ваш код учителя'}</p>
+      <p class="code-value">${escapeHtml(teacher)}</p>
+      <p class="code-note">По нему вы вернётесь к своим группам с&nbsp;другого устройства. Ученикам его не показывайте.</p>
+      <div class="code-actions">
+        <button type="button" class="button button-plain" data-action="copy-teacher">Скопировать код</button>
+        <button type="button" class="button button-plain" data-action="logout">Выйти на&nbsp;этом устройстве</button>
+      </div>
+    </div>`;
+}
+
+function renderGroup() {
+  const code = openCode();
+  app.innerHTML = `
+    <section>
+      <p class="back"><a href="#">← Ваши группы</a></p>
+      <p class="eyebrow">Учителю</p>
+      <h1>Группа ${escapeHtml(code)}</h1>
+      <p class="lead">Покажите ученикам QR-код. Они пройдут тест, а&nbsp;вы соберёте из&nbsp;них команды.</p>
+
+      ${freshTeacher ? renderTeacherCode() : ''}
+
+      <div class="card invite">
+        <div class="qr">${qrSvg(studentLink(code))}</div>
+        <div class="invite-text">
+          <p>Наведите камеру телефона на&nbsp;код или откройте ссылку:</p>
+          <p class="invite-link">${escapeHtml(studentLink(code))}</p>
+          <button type="button" class="button button-plain" data-action="copy">Скопировать ссылку</button>
+        </div>
+      </div>
+
+      <div id="live"></div>
+    </section>`;
+  renderLive();
 }
 
 function renderLive() {
@@ -122,7 +202,7 @@ function renderLive() {
     <div class="actions">
       <button type="button" class="button" data-action="distribute"${done && !busy ? '' : ' disabled'}>${view.distributed ? 'Пересобрать команды' : 'Распределить'}</button>
     </div>
-    ${problem ? `<p class="notice">${escapeHtml(problem)}</p>` : ''}
+    ${notice()}
 
     ${view.teams.length ? renderTeams() : ''}`;
 }
@@ -156,10 +236,26 @@ function describeGaps(coverage) {
   ].filter(Boolean).join(' ');
 }
 
-async function poll() {
-  const current = ++pollRun;
+async function loadGroups() {
+  const current = pollRun;
   try {
-    const next = await api('teacher', group);
+    const list = await api('groups', { teacher });
+    if (current !== pollRun) return;
+    groups = list;
+    problem = null;
+  } catch (error) {
+    if (current !== pollRun) return;
+    problem = error.status === 404 ? 'Код учителя не найден. Выйдите и введите код заново.' : 'Нет связи с сервером. Обновите страницу.';
+    renderGroups();
+    return;
+  }
+  renderGroupList();
+}
+
+async function poll() {
+  const current = pollRun;
+  try {
+    const next = await api('teacher', { code: openCode(), teacher });
     if (current !== pollRun) return;
     view = next;
     problem = null;
@@ -167,14 +263,23 @@ async function poll() {
     if (current !== pollRun) return;
     if (error.status === 403 || error.status === 404) {
       view = null;
-      problem = 'Группа не найдена: ссылка неверная или группа старше 30 дней. Создайте новую.';
+      problem = 'Такой группы нет среди ваших: она удалена через 30 дней или создана с другим кодом учителя.';
       renderLive();
       return;
     }
     problem = 'Нет связи с сервером, пробуем ещё раз…';
   }
   renderLive();
-  setTimeout(() => current === pollRun && group && poll(), POLL_MS);
+  setTimeout(() => current === pollRun && poll(), POLL_MS);
+}
+
+async function copy(target, text, done) {
+  try {
+    await navigator.clipboard.writeText(text);
+    target.textContent = done;
+  } catch {
+    target.textContent = 'Скопируйте вручную';
+  }
 }
 
 app.addEventListener('click', async event => {
@@ -184,19 +289,20 @@ app.addEventListener('click', async event => {
   switch (target.dataset.action) {
     case 'create':
       busy = true;
-      renderStart();
+      target.disabled = true;
       try {
-        group = await api('create');
+        const created = await api('create', teacher ? { teacher } : {});
+        freshTeacher = !teacher;
+        teacher = created.teacher;
+        saveTeacher();
+        groups = null;
         problem = null;
-        saveGroup();
-        view = null;
-        render();
-        poll();
+        location.hash = created.code;
       } catch (error) {
         problem = `Не получилось создать группу: ${error.message}`;
+        render();
       } finally {
         busy = false;
-        if (!group) renderStart();
       }
       break;
     case 'distribute':
@@ -204,7 +310,7 @@ app.addEventListener('click', async event => {
       busy = true;
       renderLive();
       try {
-        view = await api('distribute', group);
+        view = await api('distribute', { code: openCode(), teacher });
         problem = null;
       } catch (error) {
         problem = error.message;
@@ -214,25 +320,46 @@ app.addEventListener('click', async event => {
       }
       break;
     case 'copy':
-      try {
-        await navigator.clipboard.writeText(studentLink());
-        target.textContent = 'Ссылка скопирована';
-      } catch {
-        target.textContent = 'Скопируйте ссылку вручную';
-      }
+      copy(target, studentLink(openCode()), 'Ссылка скопирована');
       break;
-    case 'new':
-      if (!confirm('Начать новую группу? К этой можно будет вернуться только по адресу этой страницы.')) return;
-      pollRun++;
-      group = null;
-      view = null;
-      problem = null;
-      saveGroup();
-      render();
+    case 'copy-teacher':
+      copy(target, teacher, 'Код скопирован');
+      break;
+    case 'logout':
+      if (!confirm('Выйти на этом устройстве? Вернуться к группам можно будет по коду учителя.')) return;
+      teacher = null;
+      freshTeacher = false;
+      groups = null;
+      saveTeacher();
+      if (location.hash) location.hash = '';
+      else render();
       break;
   }
 });
 
-saveGroup();
+app.addEventListener('submit', async event => {
+  if (event.target.id !== 'login') return;
+  event.preventDefault();
+  const typed = normalizeTeacher(event.target.elements.teacher.value);
+  if (!typed) return;
+  busy = true;
+  renderStart();
+  try {
+    groups = await api('groups', { teacher: typed });
+    teacher = typed;
+    saveTeacher();
+    loginProblem = null;
+  } catch (error) {
+    loginProblem = error.status === 404 ? 'Такого кода учителя нет. Проверьте, нет ли опечатки.' : 'Нет связи с сервером, попробуйте ещё раз.';
+  } finally {
+    busy = false;
+  }
+  render();
+});
+
+window.addEventListener('hashchange', () => {
+  problem = null;
+  render();
+});
+
 render();
-if (group) poll();

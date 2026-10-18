@@ -109,20 +109,20 @@ function joinAndSubmit(call, code, name, scores) {
 
 test('урок целиком', () => {
   const { call } = loadBackend();
-  const { code, key } = call('create').data;
+  const { code, teacher } = call('create').data;
   const random = rng(7);
 
   const ids = Array.from({ length: 10 }, (_, i) => joinAndSubmit(call, code, `Ученик ${i}`, randomScores(random)));
   const waiting = call('join', { code, name: 'Ещё проходит' }).data.id;
 
-  let view = call('teacher', { code, key }).data;
+  let view = call('teacher', { code, teacher }).data;
   assert.equal(view.members.length, 11);
   assert.equal(view.members.filter(m => m.finished).length, 10);
   assert.equal(view.teams.length, 0);
   assert.equal(view.distributed, false);
   assert.equal(call('member', { code, id: ids[0] }).data.team, null);
 
-  view = call('distribute', { code, key }).data;
+  view = call('distribute', { code, teacher }).data;
   assert.equal(view.distributed, true);
   assert.deepEqual(view.teams.map(t => t.members.length).sort(), [3, 3, 4]);
 
@@ -132,21 +132,22 @@ test('урок целиком', () => {
 
   // Опоздавший сразу попадает в одну из троек.
   assert.ok(call('submit', { code, id: waiting, scores: randomScores(random) }).data.team);
-  view = call('teacher', { code, key }).data;
+  view = call('teacher', { code, teacher }).data;
   assert.deepEqual(view.teams.map(t => t.members.length).sort(), [3, 4, 4]);
 
   // Пересборка учитывает всех.
-  view = call('distribute', { code, key }).data;
+  view = call('distribute', { code, teacher }).data;
   assert.equal(total(view.teams.map(t => t.members.length)), 11);
 });
 
 test('доступ и проверка данных', () => {
   const { call } = loadBackend();
   const { code } = call('create').data;
+  const stranger = call('create').data.teacher;
   assert.equal(call('teacher', { code }).status, 403);
-  assert.equal(call('teacher', { code, key: 'wrong' }).status, 403);
-  assert.equal(call('teacher', { code: 'NOPE00', key: 'x' }).status, 404);
-  assert.equal(call('distribute', { code }).status, 403);
+  assert.equal(call('teacher', { code, teacher: stranger }).status, 403);
+  assert.equal(call('teacher', { code: 'NOPE00', teacher: stranger }).status, 404);
+  assert.equal(call('distribute', { code, teacher: stranger }).status, 403);
   assert.equal(call('join', { code, name: ' ' }).status, 422);
   assert.equal(call('nope').status, 400);
 
@@ -158,11 +159,48 @@ test('доступ и проверка данных', () => {
   assert.equal(call('member', { code: 'NOPE00', id }).error, 'Группа не найдена');
 });
 
+test('код учителя: выдаётся с первой группой, открывает все его группы и только их', () => {
+  const { call, props } = loadBackend();
+  const first = call('create').data;
+  assert.match(first.teacher, /^[а-я]+-[а-я]+-[а-я]+-\d{2}$/);
+  const second = call('create', { teacher: first.teacher }).data;
+  assert.equal(second.teacher, first.teacher);
+  const other = call('create').data;
+  assert.notEqual(other.teacher, first.teacher);
+
+  const mine = call('groups', { teacher: first.teacher }).data;
+  assert.deepEqual(mine.map(g => g.code).sort(), [first.code, second.code].sort());
+  assert.deepEqual(call('groups', { teacher: other.teacher }).data.map(g => g.code), [other.code]);
+
+  // Регистр, «ё», пробелы вместо дефисов — тот же код.
+  const typed = ` ${first.teacher.toUpperCase().replace(/-/g, ' ').replace(/е/, 'ё')} `;
+  assert.equal(call('groups', { teacher: typed }).data.length, 2);
+  assert.ok(call('teacher', { code: first.code, teacher: typed }).ok);
+
+  assert.equal(call('groups', { teacher: 'кот-пес-лиса-10' }).status, 404);
+  assert.equal(call('groups', {}).status, 404);
+  assert.equal(call('create', { teacher: 'кот-пес-лиса-10' }).status, 404);
+  // В хранилище только хеш кода.
+  assert.ok([...props.keys(), ...props.values()].every(text => !text.includes(first.teacher)));
+});
+
+test('список групп со счётчиками', () => {
+  const { call } = loadBackend();
+  const { code, teacher } = call('create').data;
+  joinAndSubmit(call, code, 'Прошёл Тест', randomScores(rng(4)));
+  call('join', { code, name: 'Ещё Проходит' });
+  const [group] = call('groups', { teacher }).data;
+  assert.equal(group.code, code);
+  assert.equal(group.members, 2);
+  assert.equal(group.finished, 1);
+  assert.equal(group.distributed, false);
+});
+
 test('распределение без прошедших — понятная ошибка', () => {
   const { call } = loadBackend();
-  const { code, key } = call('create').data;
+  const { code, teacher } = call('create').data;
   call('join', { code, name: 'Пока проходит' });
-  assert.deepEqual(call('distribute', { code, key }), { ok: false, status: 409, error: 'Пока никто не прошёл тест' });
+  assert.deepEqual(call('distribute', { code, teacher }), { ok: false, status: 409, error: 'Пока никто не прошёл тест' });
 });
 
 test('старые группы удаляются при создании новой', () => {
@@ -177,10 +215,10 @@ test('старые группы удаляются при создании но�
 
 test('класс из 40 человек помещается в лимиты хранилища', () => {
   const { call, props } = loadBackend();
-  const { code, key } = call('create').data;
+  const { code, teacher } = call('create').data;
   const random = rng(3);
   for (let i = 0; i < 40; i++) joinAndSubmit(call, code, `Константин Константинопольский-${i}`.slice(0, 60), randomScores(random));
-  call('distribute', { code, key });
+  call('distribute', { code, teacher });
   const sizes = [...props.values()].map(value => Buffer.byteLength(value));
   assert.ok(Math.max(...sizes) < 9 * 1024);
   // 500 КБ на всё — это примерно 50 таких классов одновременно.

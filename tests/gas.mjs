@@ -1,6 +1,6 @@
 // Запускает gas/Code.js в Node с заглушками сервисов Apps Script — для тестов и локального сервера.
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
@@ -17,7 +17,14 @@ export function loadBackend() {
       }),
     },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
-    Utilities: { getUuid: randomUUID },
+    Utilities: {
+      getUuid: randomUUID,
+      DigestAlgorithm: { SHA_256: 'sha256' },
+      Charset: { UTF_8: 'utf8' },
+      // Как в Apps Script: массив байтов со знаком, −128…127.
+      computeDigest: (algorithm, value, charset) =>
+        [...createHash(algorithm).update(value, charset).digest()].map(b => (b > 127 ? b - 256 : b)),
+    },
     ContentService: {
       MimeType: { JSON: 'application/json' },
       createTextOutput: text => ({ text, setMimeType() { return this; } }),

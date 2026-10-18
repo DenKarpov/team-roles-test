@@ -5,8 +5,11 @@
 // { ok: false, status, error }. Apps Script не умеет отдавать коды ответа и не отвечает на
 // CORS-preflight, поэтому клиент шлёт text/plain без своих заголовков, а ошибку ищет в теле.
 //
-// Хранилище — свойства скрипта: g:КОД — группа, m:КОД:ID — участник. Ограничения: 9 КБ на
-// значение, 500 КБ всего; группы старше 30 дней удаляются при создании новых.
+// Хранилище — свойства скрипта: t:ХЕШ — учитель, g:КОД — группа, m:КОД:ID — участник.
+// Ограничения: 9 КБ на значение, 500 КБ всего; группы старше 30 дней удаляются при создании новых.
+//
+// Регистрации нет. При первой группе сайт выдаёт учителю код («лиса-окно-гора-42»): он и есть
+// доступ ко всем его группам с любого устройства. Хранится только хеш кода.
 
 const ROLE_CODES = ['PL', 'ME', 'IMP', 'RI', 'TW', 'CO', 'SH', 'CF', 'SP'];
 
@@ -190,8 +193,8 @@ function withLock(action) {
   }
 }
 
-// Код группы короткий, его видят все. Ключ учителя и id учеников — из UUID: Math.random
-// предсказуем, по выданным id можно было бы восстановить его состояние.
+// Код группы короткий, его видят все. Секреты — код учителя и id учеников — из UUID:
+// Math.random предсказуем, по выданным id можно было бы восстановить его состояние.
 function groupCode() {
   let code = '';
   for (let i = 0; i < 6; i++) code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
@@ -200,10 +203,59 @@ function groupCode() {
 
 const secretId = () => Utilities.getUuid().replace(/-/g, '');
 
+// 128 слов — делитель 256, поэтому байт UUID выбирает слово равновероятно.
+const WORDS = [
+  'кот', 'пес', 'лиса', 'волк', 'заяц', 'сова', 'рыба', 'кит', 'слон', 'лев', 'тигр', 'жук', 'утка', 'гусь', 'конь', 'бобр',
+  'лось', 'енот', 'панда', 'белка', 'ворон', 'сокол', 'чайка', 'акула', 'краб', 'олень', 'зебра', 'жираф', 'пингвин', 'дельфин', 'кролик', 'хомяк',
+  'море', 'река', 'озеро', 'гора', 'лес', 'поле', 'луг', 'сад', 'парк', 'дождь', 'снег', 'ветер', 'гроза', 'туча', 'облако', 'радуга',
+  'солнце', 'луна', 'звезда', 'комета', 'остров', 'берег', 'волна', 'песок', 'камень', 'скала', 'пещера', 'ручей', 'туман', 'иней', 'роса', 'заря',
+  'мост', 'дом', 'окно', 'дверь', 'стол', 'стул', 'лампа', 'книга', 'ручка', 'мяч', 'кубик', 'замок', 'башня', 'парус', 'лодка', 'якорь',
+  'маяк', 'ракета', 'поезд', 'трамвай', 'шар', 'флаг', 'ключ', 'часы', 'компас', 'карта', 'глобус', 'кисть', 'краска', 'доска', 'пенал', 'рюкзак',
+  'дуб', 'липа', 'ель', 'сосна', 'ива', 'кедр', 'роза', 'мак', 'лилия', 'ромашка', 'груша', 'слива', 'вишня', 'яблоко', 'арбуз', 'дыня',
+  'лимон', 'банан', 'орех', 'гриб', 'ягода', 'малина', 'сыр', 'хлеб', 'суп', 'чай', 'пирог', 'торт', 'блин', 'каша', 'морковь', 'огурец',
+];
+
+// Три слова и число: около 200 млн вариантов — подбором через сайт не перебрать,
+// а записать и продиктовать легко.
+function teacherCode() {
+  const hex = Utilities.getUuid().replace(/-/g, '');
+  const byte = i => parseInt(hex.substr(i * 2, 2), 16);
+  return [WORDS[byte(0) % WORDS.length], WORDS[byte(1) % WORDS.length], WORDS[byte(2) % WORDS.length], 10 + (byte(3) % 90)].join('-');
+}
+
+// Код учителя прощает регистр, «ё» и разделители: «Лиса Окно гора 42» — тот же код.
+function normalizeTeacher(value) {
+  return String(value || '').toLowerCase().replace(/ё/g, 'е').split(/[^a-zа-я0-9]+/).filter(Boolean).join('-');
+}
+
+function teacherHash(value) {
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, normalizeTeacher(value), Utilities.Charset.UTF_8);
+  return bytes.map(b => ((b + 256) % 256).toString(16).padStart(2, '0')).join('');
+}
+
+function findTeacher(all, value) {
+  const hash = teacherHash(value);
+  if (!normalizeTeacher(value) || !all['t:' + hash]) throw httpError(404, 'Код учителя не найден');
+  return hash;
+}
+
 // ---------------------------------------------------------------- Действия
 
-function checkTeacher(group, key) {
-  if (!key || key !== group.key) throw httpError(403, 'Нет доступа к группе');
+function checkOwner(group, teacher) {
+  if (!normalizeTeacher(teacher) || teacherHash(teacher) !== group.owner) throw httpError(403, 'Нет доступа к группе');
+}
+
+// Старые группы чистим при создании новых, отдельный триггер для этого не нужен.
+function deleteExpired(all) {
+  const expired = Date.now() - KEEP_DAYS * 24 * 3600 * 1000;
+  Object.keys(all).forEach(key => {
+    if (key.indexOf('g:') === 0 && JSON.parse(all[key]).created < expired) {
+      const code = key.slice(2);
+      Object.keys(all)
+        .filter(k => k === key || k.indexOf('m:' + code + ':') === 0)
+        .forEach(k => store().deleteProperty(k));
+    }
+  });
 }
 
 function cleanName(value) {
@@ -222,31 +274,50 @@ function checkScores(scores) {
 }
 
 const ACTIONS = {
-  create() {
+  // Без кода учителя — первая группа: выдаём новый код.
+  create({ teacher }) {
     return withLock(() => {
       const all = readAll();
-      // Старые группы чистим здесь же, отдельный триггер для этого не нужен.
-      const expired = Date.now() - KEEP_DAYS * 24 * 3600 * 1000;
-      Object.keys(all).forEach(key => {
-        if (key.indexOf('g:') === 0 && JSON.parse(all[key]).created < expired) {
-          const code = key.slice(2);
-          Object.keys(all)
-            .filter(k => k === key || k.indexOf('m:' + code + ':') === 0)
-            .forEach(k => store().deleteProperty(k));
-        }
-      });
+      deleteExpired(all);
+      let owner;
+      if (teacher) {
+        owner = findTeacher(all, teacher);
+      } else {
+        teacher = teacherCode();
+        owner = teacherHash(teacher);
+        store().setProperty('t:' + owner, JSON.stringify({ created: Date.now() }));
+      }
       let code;
       do code = groupCode(); while (all['g:' + code]);
-      const group = { key: secretId(), distributed: false, created: Date.now() };
-      store().setProperty('g:' + code, JSON.stringify(group));
-      return { code, key: group.key };
+      store().setProperty('g:' + code, JSON.stringify({ owner, distributed: false, created: Date.now() }));
+      return { code, teacher: normalizeTeacher(teacher) };
     });
   },
 
-  teacher({ code, key }) {
+  groups({ teacher }) {
+    const all = readAll();
+    const owner = findTeacher(all, teacher);
+    return Object.keys(all)
+      .filter(key => key.indexOf('g:') === 0)
+      .map(key => Object.assign(JSON.parse(all[key]), { code: key.slice(2) }))
+      .filter(group => group.owner === owner)
+      .sort((a, b) => b.created - a.created)
+      .map(group => {
+        const members = loadMembers(all, group.code);
+        return {
+          code: group.code,
+          created: group.created,
+          distributed: group.distributed,
+          members: members.length,
+          finished: members.filter(m => m.scores).length,
+        };
+      });
+  },
+
+  teacher({ code, teacher }) {
     const all = readAll();
     const group = loadGroup(all, code);
-    checkTeacher(group, key);
+    checkOwner(group, teacher);
     const members = loadMembers(all, code);
     return {
       code,
@@ -256,11 +327,11 @@ const ACTIONS = {
     };
   },
 
-  distribute({ code, key }) {
+  distribute({ code, teacher }) {
     return withLock(() => {
       const all = readAll();
       const group = loadGroup(all, code);
-      checkTeacher(group, key);
+      checkOwner(group, teacher);
       const members = loadMembers(all, code);
       const done = finished(members);
       if (!done.length) throw httpError(409, 'Пока никто не прошёл тест');
@@ -272,7 +343,7 @@ const ACTIONS = {
         updates['m:' + code + ':' + id] = JSON.stringify(Object.assign(data, { team: teamOf[id] || null }));
       });
       store().setProperties(updates);
-      return ACTIONS.teacher({ code, key });
+      return ACTIONS.teacher({ code, teacher });
     });
   },
 

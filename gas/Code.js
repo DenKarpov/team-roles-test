@@ -19,7 +19,6 @@ const POSITION_ROLES = [['PL'], ['ME'], ['RI'], ['TW', 'CO', 'SH'], ['IMP', 'SP'
 
 const TOTAL_POINTS = 50;
 const KEEP_DAYS = 30;
-const MAX_TEAM = 4;
 const CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 
 // ---------------------------------------------------------------- Алгоритм
@@ -83,7 +82,8 @@ function minBy(items, key) {
   return items.reduce((best, item) => (compareKeys(key(item), key(best)) < 0 ? item : best));
 }
 
-// Куда поставить человека сверх троек: в самую маленькую команду, где он закроет больше ролей.
+// Куда поставить человека сверх троек или опоздавшего: в самую маленькую команду, где он закроет
+// больше ролей. Новых команд не открываем — если опоздавших много, учитель пересоберёт команды.
 function lateTeam(teams, member) {
   const smallest = Math.min(...teams.map(team => team.length));
   const candidates = teams.map((_, i) => i).filter(i => teams[i].length === smallest);
@@ -91,13 +91,6 @@ function lateTeam(teams, member) {
     const covered = coverage(teams[i]);
     return [-gain(covered, member), covered.reduce((a, b) => a + b, 0), i];
   });
-}
-
-// Номер команды для того, кто закончил после распределения. Если во всех командах уже по 4 —
-// например, распределили, когда прошли тест двое, — открывает новую, следующие её достроят.
-function lateTeamNumber(teams, member) {
-  if (!teams.length || Math.min(...teams.map(team => team.length)) >= MAX_TEAM) return teams.length + 1;
-  return lateTeam(teams, member) + 1;
 }
 
 // Тройки набором по кругам: в каждом круге команды выбирают по одному в обратном порядке.
@@ -375,7 +368,7 @@ const ACTIONS = {
       // Кто закончил после распределения, сразу встаёт в команду, где ему больше всего не хватает ролей.
       if (group.distributed && !me.team) {
         const teams = currentTeams(finished(members.filter(m => m.id !== id)));
-        me.team = lateTeamNumber(teams, Object.assign({}, me, { levels: positionLevels(clean) }));
+        me.team = lateTeam(teams, Object.assign({}, me, { levels: positionLevels(clean) })) + 1;
       }
       saveMember(code, me);
     });

@@ -140,18 +140,18 @@ test('урок целиком', () => {
   assert.equal(total(view.teams.map(t => t.members.length)), 11);
 });
 
-test('опоздавшие не набиваются в одну команду, если распределили рано', () => {
+test('опоздавшие сначала заполняют неполные команды, потом расходятся поровну', () => {
   const { call } = loadBackend();
   const { code, teacher } = call('create').data;
   const random = rng(9);
-  joinAndSubmit(call, code, 'Пришёл Первым', randomScores(random));
-  joinAndSubmit(call, code, 'Пришёл Вторым', randomScores(random));
-  assert.equal(call('distribute', { code, teacher }).data.teams.length, 1);
-  for (let i = 0; i < 11; i++) joinAndSubmit(call, code, `Опоздавший ${i}`, randomScores(random));
-  const sizes = call('teacher', { code, teacher }).data.teams.map(t => t.members.length);
-  assert.equal(total(sizes), 13);
-  assert.ok(sizes.every(size => size <= 4), sizes.join('+'));
-  assert.deepEqual(sizes, [4, 4, 4, 1]);
+  for (let i = 0; i < 7; i++) joinAndSubmit(call, code, `Вовремя ${i}`, randomScores(random));
+  const sizes = () => call('teacher', { code, teacher }).data.teams.map(t => t.members.length).sort();
+  call('distribute', { code, teacher });
+  assert.deepEqual(sizes(), [3, 4]);
+  joinAndSubmit(call, code, 'Опоздавший 1', randomScores(random));
+  assert.deepEqual(sizes(), [4, 4]);
+  for (let i = 2; i <= 4; i++) joinAndSubmit(call, code, `Опоздавший ${i}`, randomScores(random));
+  assert.deepEqual(sizes(), [5, 6]);
 });
 
 test('доступ и проверка данных', () => {

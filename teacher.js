@@ -1,7 +1,7 @@
 'use strict';
 
 const STORAGE_KEY = 'team-roles-teacher-v1';
-const POLL_MS = 4000;
+const POLL_MS = 5000;
 
 const app = document.getElementById('app');
 
@@ -159,7 +159,7 @@ function describeGaps(coverage) {
 async function poll() {
   const current = ++pollRun;
   try {
-    const next = await api(`/api/groups/${group.code}`, { key: group.key });
+    const next = await api('teacher', group);
     if (current !== pollRun) return;
     view = next;
     problem = null;
@@ -186,7 +186,7 @@ app.addEventListener('click', async event => {
       busy = true;
       renderStart();
       try {
-        group = await api('/api/groups', { method: 'POST' });
+        group = await api('create');
         problem = null;
         saveGroup();
         view = null;
@@ -204,7 +204,7 @@ app.addEventListener('click', async event => {
       busy = true;
       renderLive();
       try {
-        view = await api(`/api/groups/${group.code}/distribute`, { method: 'POST', key: group.key });
+        view = await api('distribute', group);
         problem = null;
       } catch (error) {
         problem = error.message;

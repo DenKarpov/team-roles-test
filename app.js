@@ -170,7 +170,7 @@ let joining = null;
 function joinGroup() {
   const group = state.group;
   if (!group || group.memberId) return Promise.resolve();
-  joining ??= api(`/api/groups/${group.code}/members`, { method: 'POST', body: { name: cleanName(group.name) } })
+  joining ??= api('join', { code: group.code, name: cleanName(group.name) })
     .then(({ id }) => {
       group.memberId = id;
       save();
@@ -327,8 +327,8 @@ async function syncGroup() {
   let delay = 10000;
   try {
     await joinGroup();
-    const path = `/api/groups/${group.code}/members/${group.memberId}`;
-    const me = group.sent ? await api(path) : await api(path, { method: 'PUT', body: { scores: scoreRoles() } });
+    const member = { code: group.code, id: group.memberId };
+    const me = group.sent ? await api('member', member) : await api('submit', { ...member, scores: scoreRoles() });
     if (run !== syncRun) return;
     group.sent = true;
     save();

@@ -1,2 +1,0 @@
-fastapi==0.144.0
-psycopg[binary]==3.3.6

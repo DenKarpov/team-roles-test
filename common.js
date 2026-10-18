@@ -15,15 +15,13 @@ function plural(n, one, few, many) {
 // Имена приходят от учеников, в разметку они попадают только через эту функцию.
 const escapeHtml = text => String(text).replace(/[&<>"']/g, char => `&#${char.charCodeAt(0)};`);
 
-async function api(path, { method = 'GET', body, key } = {}) {
-  const headers = {};
-  if (body) headers['Content-Type'] = 'application/json';
-  if (key) headers['X-Teacher-Key'] = key;
-  const response = await fetch(API_URL + path, { method, headers, body: body && JSON.stringify(body) });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const detail = typeof data.detail === 'string' ? data.detail : `Ошибка ${response.status}`;
-    throw Object.assign(new Error(detail), { status: response.status });
-  }
-  return data;
+// Бэкенд — Google Apps Script (gas/Code.js): один адрес, POST с телом { action, ... }.
+// Тело уходит как text/plain и без своих заголовков: на CORS-preflight Apps Script не отвечает.
+// Коды ответа он тоже не отдаёт, поэтому ошибка приходит в теле.
+async function api(action, params = {}) {
+  const response = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action, ...params }) });
+  const result = await response.json().catch(() => null);
+  if (!result) throw Object.assign(new Error(`Ошибка ${response.status}`), { status: response.status });
+  if (!result.ok) throw Object.assign(new Error(result.error), { status: result.status });
+  return result.data;
 }

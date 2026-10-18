@@ -125,12 +125,12 @@ function renderGroupList() {
     return;
   }
   box.innerHTML = groups.length
-    ? `<ul class="card people group-list">
+    ? `<ul class="card list">
         ${groups.map(group => `
           <li>
-            <a href="#${escapeHtml(group.code)}">
-              <span><strong>Группа ${escapeHtml(group.code)}</strong><small>${formatDate(group.created)}</small></span>
-              <span class="status${group.distributed ? ' is-done' : ''}">${group.distributed
+            <a class="list-row" href="#${escapeHtml(group.code)}">
+              <span class="list-main"><strong>Группа ${escapeHtml(group.code)}</strong><small>${formatDate(group.created)}</small></span>
+              <span class="list-meta${group.distributed ? ' is-done' : ''}">${group.distributed
                 ? 'команды собраны'
                 : group.members ? `прошли ${group.finished} из&nbsp;${group.members}` : 'пока никого'}</span>
             </a>
@@ -141,14 +141,15 @@ function renderGroupList() {
 
 function renderTeacherCode() {
   return `
-    <div class="card teacher-code${freshTeacher ? ' is-fresh' : ''}">
-      <p class="team-label">${freshTeacher ? 'Запишите код учителя' : 'Ваш код учителя'}</p>
-      <p class="code-value">${escapeHtml(teacher)}</p>
-      <p class="code-note">По нему вы вернётесь к своим группам с&nbsp;другого устройства. Ученикам его не показывайте.</p>
-      <div class="code-actions">
-        <button type="button" class="button button-plain" data-action="copy-teacher">Скопировать код</button>
-        <button type="button" class="button button-plain" data-action="logout">Выйти на&nbsp;этом устройстве</button>
+    <div class="code-section${freshTeacher ? ' is-fresh' : ''}">
+      <h2 class="subhead">Код учителя</h2>
+      <div class="card code-card">
+        <span class="code-value">${escapeHtml(teacher)}</span>
+        <button type="button" class="link-button" data-action="copy-teacher">Скопировать</button>
       </div>
+      <p class="code-note">По нему вы вернётесь к&nbsp;своим группам с&nbsp;другого устройства. Ученикам его не&nbsp;показывайте.${freshTeacher
+        ? ''
+        : ' <button type="button" class="link-button" data-action="logout">Выйти на&nbsp;этом устройстве</button>'}</p>
     </div>`;
 }
 
@@ -157,24 +158,37 @@ function renderGroup() {
   app.innerHTML = `
     <section>
       <p class="back"><a href="#">← Ваши группы</a></p>
-      <p class="eyebrow">Учителю</p>
       <h1>Группа ${escapeHtml(code)}</h1>
-      <p class="lead">Покажите ученикам QR-код. Они пройдут тест, а&nbsp;вы соберёте из&nbsp;них команды.</p>
-
-      ${freshTeacher ? renderTeacherCode() : ''}
-
-      <div class="card invite">
-        <div class="qr">${qrSvg(studentLink(code))}</div>
-        <div class="invite-text">
-          <p>Наведите камеру телефона на&nbsp;код или откройте ссылку:</p>
-          <p class="invite-link">${escapeHtml(studentLink(code))}</p>
-          <button type="button" class="button button-plain" data-action="copy">Скопировать ссылку</button>
-        </div>
-      </div>
-
-      <div id="live"></div>
+      ${freshTeacher ? renderFirstCode() : renderInvite(code)}
     </section>`;
   renderLive();
+}
+
+// После первой группы сначала только код учителя: страницу с QR выводят на проектор,
+// код там светиться не должен.
+function renderFirstCode() {
+  return `
+    <p class="lead">Группа создана. Прежде чем показывать QR-код ученикам, запишите код учителя.</p>
+    ${renderTeacherCode()}
+    <div class="actions">
+      <button type="button" class="button" data-action="code-saved">Готово, показать QR-код</button>
+    </div>`;
+}
+
+function renderInvite(code) {
+  return `
+    <p class="lead">Покажите ученикам QR-код. Они пройдут тест, а&nbsp;вы соберёте из&nbsp;них команды.</p>
+
+    <div class="card invite">
+      <div class="qr">${qrSvg(studentLink(code))}</div>
+      <div class="invite-text">
+        <p>Наведите камеру телефона на&nbsp;код или откройте ссылку:</p>
+        <p class="invite-link">${escapeHtml(studentLink(code))}</p>
+        <button type="button" class="link-button" data-action="copy">Скопировать ссылку</button>
+      </div>
+    </div>
+
+    <div id="live"></div>`;
 }
 
 function renderLive() {
@@ -323,7 +337,11 @@ app.addEventListener('click', async event => {
       copy(target, studentLink(openCode()), 'Ссылка скопирована');
       break;
     case 'copy-teacher':
-      copy(target, teacher, 'Код скопирован');
+      copy(target, teacher, 'Скопировано');
+      break;
+    case 'code-saved':
+      freshTeacher = false;
+      render();
       break;
     case 'logout':
       if (!confirm('Выйти на этом устройстве? Вернуться к группам можно будет по коду учителя.')) return;

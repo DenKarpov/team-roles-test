@@ -366,7 +366,7 @@ a.topbar-title { color: var(--text); text-decoration: none; }
 .qr svg { display: block; width: 100%; height: auto; }
 .invite-text p { color: var(--text-2); }
 .invite-text .invite-link { margin-top: 8px; color: var(--text); font-weight: 600; word-break: break-all; }
-.invite-text .button { margin-top: 12px; margin-left: -14px; }
+.invite-text .link-button { margin-top: 12px; }
 
 .people { margin-top: 24px; padding: 4px 28px; }
 .status { flex: none; font-size: 14px; color: var(--text-3); }
@@ -388,28 +388,73 @@ a.topbar-title { color: var(--text); text-decoration: none; }
 .login p { margin-top: 8px; color: var(--text-2); }
 .login .actions { margin-top: 20px; }
 
-.teacher-code { margin-top: 40px; padding: 28px; }
-.teacher-code.is-fresh { box-shadow: inset 0 0 0 2px var(--accent); }
-.code-value { margin-top: 6px; font-size: 28px; line-height: 1.2; font-weight: 600; word-break: break-word; }
-.code-note { margin-top: 8px; font-size: 15px; color: var(--text-2); }
-.code-actions { margin: 12px 0 0 -14px; display: flex; flex-wrap: wrap; gap: 4px; }
+/* Текстовая кнопка: ссылка, которая что-то делает на странице */
 
-.group-list { margin-top: 32px; }
-.group-list li { padding: 0; }
+.link-button {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 15px;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
 
-.group-list a {
-  flex: 1;
+.link-button:hover { text-decoration: underline; }
+
+/* Список групп — как сгруппированный список в iOS */
+
+.list { margin-top: 32px; overflow: hidden; }
+
+.list-row {
+  position: relative;
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 0;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px 14px 28px;
   color: var(--text);
   text-decoration: none;
 }
 
-.group-list a:hover strong { color: var(--accent); }
-.group-list small { display: block; margin-top: 2px; font-size: 14px; color: var(--text-2); }
+.list-row:hover { background: #fafafc; text-decoration: none; }
+
+.list li + li .list-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 28px;
+  right: 0;
+  border-top: 1px solid var(--line);
+}
+
+.list-row::after { content: "›"; flex: none; font-size: 24px; line-height: 1; color: var(--faint); }
+
+.list-main { flex: 1; min-width: 0; }
+.list-main strong { display: block; font-weight: 600; }
+.list-main small { display: block; margin-top: 2px; font-size: 14px; color: var(--text-2); }
+.list-meta { flex: none; font-size: 15px; color: var(--text-3); }
+.list-meta.is-done { color: var(--accent); }
+
+/* Код учителя */
+
+.code-section { margin-top: 56px; }
+.code-section.is-fresh { margin-top: 40px; }
+.subhead { font-size: 21px; font-weight: 600; letter-spacing: 0.011em; }
+
+.code-card {
+  margin-top: 12px;
+  padding: 16px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.code-value { font-size: 21px; font-weight: 600; word-break: break-word; }
+.code-note { margin-top: 10px; padding: 0 28px; font-size: 14px; color: var(--text-2); }
+.code-note .link-button { font-size: 14px; }
 
 .team { padding: 24px; }
 .team h3 { font-size: 21px; font-weight: 600; margin: 0 0 8px; }
@@ -454,7 +499,11 @@ a.topbar-title { color: var(--text); text-decoration: none; }
   .positions li { flex-direction: column; gap: 6px; padding-right: 20px; }
   .via { max-width: none; text-align: left; }
 
-  .join, .team-card, .invite, .login, .teacher-code { padding: 24px; }
+  .join, .team-card, .invite, .login { padding: 24px; }
+  .list-row { padding-left: 20px; }
+  .list li + li .list-row::before { left: 20px; }
+  .code-card { padding-inline: 20px; }
+  .code-note { padding-inline: 20px; }
   .invite { grid-template-columns: 1fr; gap: 20px; }
   .qr { max-width: 260px; }
   .people { padding-inline: 20px; }

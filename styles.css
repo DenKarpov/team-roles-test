@@ -296,6 +296,96 @@ h1 {
 .positions small { display: block; margin-top: 2px; font-size: 14px; color: var(--text-2); }
 .via { flex: none; max-width: 45%; text-align: right; font-size: 14px; color: var(--text-3); }
 
+/* Группа: вход ученика и его команда */
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+a.topbar-title { color: var(--text); text-decoration: none; }
+
+.aside { margin-top: 32px; font-size: 14px; }
+
+.join { margin-top: 16px; padding: 32px; }
+.join h2 { font-size: 21px; font-weight: 600; letter-spacing: 0.011em; }
+.join p { margin-top: 8px; color: var(--text-2); }
+.join .join-name { color: var(--text); }
+
+.field { display: grid; gap: 6px; margin-top: 20px; }
+.field span { font-size: 14px; color: var(--text-2); }
+
+.field input {
+  width: 100%;
+  max-width: 420px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.field input:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+
+.team-card { margin-top: 40px; padding: 28px; }
+.team-label { font-size: 14px; font-weight: 600; color: var(--text-2); }
+.team-title { margin-top: 4px; font-size: 32px; line-height: 1.125; font-weight: 600; }
+.team-status { margin-top: 6px; font-size: 19px; line-height: 1.4; }
+
+.mates { margin-top: 16px; }
+
+.mates li,
+.team li,
+.people li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.mates li:last-child,
+.team li:last-child,
+.people li:last-child { border-bottom: 0; }
+
+.mates .is-me { font-weight: 600; }
+.mates small { font-weight: 400; color: var(--text-2); }
+.mate-role { flex: none; font-size: 14px; color: var(--text-2); }
+
+/* Страница учителя */
+
+.invite {
+  margin-top: 40px;
+  padding: 28px;
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  align-items: center;
+  gap: 32px;
+}
+
+.qr svg { display: block; width: 100%; height: auto; }
+.invite-text p { color: var(--text-2); }
+.invite-text .invite-link { margin-top: 8px; color: var(--text); font-weight: 600; word-break: break-all; }
+.invite-text .button { margin-top: 12px; margin-left: -14px; }
+
+.people { margin-top: 24px; padding: 4px 28px; }
+.status { flex: none; font-size: 14px; color: var(--text-3); }
+.status.is-done { color: var(--accent); }
+
+.notice { margin-top: 16px; font-size: 15px; color: var(--text-2); }
+
+.teams {
+  margin-top: 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.team { padding: 24px; }
+.team h3 { font-size: 21px; font-weight: 600; margin: 0 0 8px; }
+.team ul { margin: 0; }
+.team-gaps { margin-top: 12px; font-size: 14px; color: var(--text-2); }
+
 /* Узкие экраны */
 
 @media (max-width: 640px) {
@@ -333,6 +423,11 @@ h1 {
   .positions { padding-left: 20px; }
   .positions li { flex-direction: column; gap: 6px; padding-right: 20px; }
   .via { max-width: none; text-align: left; }
+
+  .join, .team-card, .invite { padding: 24px; }
+  .invite { grid-template-columns: 1fr; gap: 20px; }
+  .qr { max-width: 260px; }
+  .people { padding-inline: 20px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

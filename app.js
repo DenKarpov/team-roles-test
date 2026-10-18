@@ -16,12 +16,21 @@ const progressFill = document.getElementById('progress-fill');
 
 let state = load() || newState();
 
-function newState() {
+// Ссылка из QR учителя: ?g=КОД. С ней результат уходит в группу и ученик видит свою команду.
+// Прогресс привязан к группе: по ссылке другой группы тест начинается заново, имя сохраняется.
+const groupCode = new URLSearchParams(location.search).get('g')?.trim().toUpperCase() || null;
+if ((state.group?.code ?? null) !== groupCode) {
+  state = newState(groupCode && { code: groupCode, name: state.group?.name ?? '', memberId: null, sent: false });
+  save();
+}
+
+function newState(group = null) {
   return {
     screen: 'intro',
     block: 0,
     order: BLOCKS.map(block => shuffle(block.map((_, i) => i))),
     points: BLOCKS.map(block => block.map(() => 0)),
+    group,
   };
 }
 
@@ -51,16 +60,6 @@ function save() {
   } catch {
     // Без localStorage тест работает, просто не переживает перезагрузку.
   }
-}
-
-const sum = list => list.reduce((a, b) => a + b, 0);
-
-function plural(n, one, few, many) {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return one;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
-  return many;
 }
 
 const formatPoints = n => `${n} ${plural(n, 'балл', 'балла', 'баллов')}`;
@@ -135,11 +134,49 @@ function renderIntro() {
         </ol>
       </div>
 
+      ${state.group ? renderJoin() : ''}
+
       <div class="actions">
-        <button type="button" class="button" data-action="start">${started ? 'Продолжить' : 'Начать'}</button>
+        <button type="button" class="button" data-action="start" id="start"${canStart() ? '' : ' disabled'}>${started ? 'Продолжить' : 'Начать'}</button>
         ${started ? '<button type="button" class="button button-plain" data-action="restart">Начать заново</button>' : ''}
       </div>
+
+      ${state.group ? '' : '<p class="aside"><a href="teacher.html">Учителю: собрать команды по&nbsp;результатам&nbsp;→</a></p>'}
     </section>`;
+}
+
+const cleanName = name => name.trim().replace(/\s+/g, ' ');
+const canStart = () => !state.group || state.group.memberId || cleanName(state.group.name).length >= 2;
+
+function renderJoin() {
+  const { name, memberId } = state.group;
+  return `
+    <div class="card join">
+      <h2>Тест в&nbsp;группе</h2>
+      <p>После теста учитель соберёт команды, и&nbsp;вы увидите свою в&nbsp;конце.</p>
+      ${memberId
+        ? `<p class="join-name">Вы&nbsp;— <strong>${escapeHtml(name)}</strong></p>`
+        : `<label class="field">
+             <span>Имя и фамилия</span>
+             <input id="name" type="text" maxlength="60" autocomplete="name" placeholder="Петя Иванов" value="${escapeHtml(name)}">
+           </label>`}
+    </div>`;
+}
+
+// Ученик появляется у учителя в списке, как только начал тест. Если сеть подвела,
+// вступим в группу при отправке результата. Один запрос на двоих, чтобы не задвоиться в списке.
+let joining = null;
+
+function joinGroup() {
+  const group = state.group;
+  if (!group || group.memberId) return Promise.resolve();
+  joining ??= api(`/api/groups/${group.code}/members`, { method: 'POST', body: { name: cleanName(group.name) } })
+    .then(({ id }) => {
+      group.memberId = id;
+      save();
+    })
+    .finally(() => { joining = null; });
+  return joining;
 }
 
 function renderBlock() {
@@ -208,6 +245,8 @@ function renderResult() {
       <h1>Ваш профиль</h1>
       <p class="lead">${lead.length > 1 ? 'Ведущие роли' : 'Ведущая роль'} — ${joinRu(lead)}.</p>
 
+      ${state.group ? '<div class="card team-card" id="team" aria-live="polite"></div>' : ''}
+
       <div class="card profile">
         ${GROUPS.map((group, g) => {
           const roles = ranked.filter(role => role.group === g);
@@ -248,6 +287,66 @@ function renderResult() {
         <button type="button" class="button" data-action="restart">Пройти заново</button>
       </div>
     </section>`;
+
+  if (state.group) {
+    renderTeam({ status: 'sending' });
+    syncGroup();
+  }
+}
+
+const TEAM_STATUS = {
+  sending: 'Отправляем результат учителю…',
+  waiting: 'Результат у учителя. Команда появится здесь, когда учитель соберёт команды.',
+  offline: 'Не получается связаться с сервером. Пробуем ещё раз…',
+  missing: 'Группа не найдена: возможно, ссылка устарела. Попросите у учителя новую.',
+};
+
+function renderTeam({ status, team }) {
+  const box = document.getElementById('team');
+  if (!box) return;
+  box.innerHTML = team
+    ? `<p class="team-label">Ваша команда</p>
+       <h2 class="team-title">Команда ${team.number}</h2>
+       <ul class="mates">
+         ${team.members.map(member => `
+           <li${member.me ? ' class="is-me"' : ''}>
+             <span>${escapeHtml(member.name)}${member.me ? ' <small>— вы</small>' : ''}</span>
+             <span class="mate-role">${POSITIONS[member.role].name}</span>
+           </li>`).join('')}
+       </ul>`
+    : `<p class="team-label">Команда</p><p class="team-status">${TEAM_STATUS[status]}</p>`;
+}
+
+// Отправляет результат и ждёт команду. Пока команды нет, спрашивает часто, потом реже:
+// учитель может пересобрать команды.
+let syncRun = 0;
+
+async function syncGroup() {
+  const run = ++syncRun;
+  const group = state.group;
+  let delay = 10000;
+  try {
+    await joinGroup();
+    const path = `/api/groups/${group.code}/members/${group.memberId}`;
+    const me = group.sent ? await api(path) : await api(path, { method: 'PUT', body: { scores: scoreRoles() } });
+    if (run !== syncRun) return;
+    group.sent = true;
+    save();
+    renderTeam({ status: 'waiting', team: me.team });
+    delay = me.team ? 15000 : 5000;
+  } catch (error) {
+    if (run !== syncRun) return;
+    if (error.message === 'Группа не найдена') {
+      renderTeam({ status: 'missing' });
+      return;
+    }
+    if (error.message === 'Участник не найден') {
+      Object.assign(group, { memberId: null, sent: false });
+      save();
+    }
+    renderTeam({ status: 'offline' });
+  }
+  setTimeout(() => run === syncRun && state.screen === 'result' && syncGroup(), delay);
 }
 
 function go(screen, block = state.block) {
@@ -275,10 +374,11 @@ app.addEventListener('click', event => {
       break;
     }
     case 'start':
+      joinGroup().catch(() => {});
       go('block');
       break;
     case 'restart':
-      state = newState();
+      state = newState(state.group && { ...state.group, sent: false });
       go('block', 0);
       break;
     case 'back':
@@ -290,6 +390,13 @@ app.addEventListener('click', event => {
       else go('block', state.block + 1);
       break;
   }
+});
+
+app.addEventListener('input', event => {
+  if (event.target.id !== 'name') return;
+  state.group.name = event.target.value;
+  save();
+  document.getElementById('start').disabled = !canStart();
 });
 
 render();

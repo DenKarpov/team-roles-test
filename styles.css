@@ -456,6 +456,7 @@ a.list-row { text-decoration: none; }
 .team h3 { font-size: 21px; font-weight: 600; margin: 0 0 8px; }
 .team ul { margin: 0; }
 .team-gaps { margin-top: 12px; font-size: 14px; color: var(--text-2); }
+.team-gaps span { white-space: nowrap; }
 
 /* Узкие экраны */
 

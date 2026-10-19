@@ -278,14 +278,14 @@ function renderTeams() {
 
 // coverage — по каждой роли в проекте: 1 — закрыта основной ролью, ½ — только дополнительной, 0 — никем.
 function describeGaps(coverage) {
-  const names = level => POSITIONS.filter((_, p) => coverage[p] === level).map(position => position.name);
+  const names = level => POSITIONS.filter((_, p) => coverage[p] === level).map(position => `<span>${position.name}</span>`);
   const missing = names(0);
   const secondary = names(0.5);
   if (!missing.length && !secondary.length) return 'Все роли закрыты основными ролями.';
   return [
     missing.length && `Нет: ${missing.join(', ')}.`,
     secondary.length && `Только по&nbsp;дополнительной роли: ${secondary.join(', ')}.`,
-  ].filter(Boolean).join(' ');
+  ].filter(Boolean).join('<br>');
 }
 
 async function loadGroups() {

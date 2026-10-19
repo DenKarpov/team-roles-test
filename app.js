@@ -3,12 +3,6 @@
 const TOTAL = 10;
 const STORAGE_KEY = 'team-roles-v1';
 
-const GROUPS = [
-  { title: 'Основные',            note: 'Так вы ведёте себя в команде чаще всего.' },
-  { title: 'Дополнительные',      note: 'Можете взять на себя, но они выражены слабее.' },
-  { title: 'Наименее выраженные', note: 'Не слабые места: такое поведение просто менее естественно и требует больше усилий.' },
-];
-
 const app = document.getElementById('app');
 const stepLabel = document.getElementById('step');
 const progress = document.getElementById('progress');
@@ -64,39 +58,13 @@ function save() {
 
 const formatPoints = n => `${n} ${plural(n, 'балл', 'балла', 'баллов')}`;
 
-function joinRu(items) {
-  return items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} и ${items.at(-1)}`;
-}
+// Всего 50 баллов, поэтому балл — ровно 2 %, и проценты в сумме дают 100.
+const percent = score => Math.round((score / (TOTAL * BLOCKS.length)) * 100);
 
 function scoreRoles() {
   const scores = Object.fromEntries(Object.keys(ROLES).map(code => [code, 0]));
   BLOCKS.forEach((block, b) => block.forEach(([code], i) => { scores[code] += state.points[b][i]; }));
   return scores;
-}
-
-// Места как в спорте: равные баллы делят одно место (1, 2, 2, 4).
-// Группа берётся по месту: 1–3 основные, 4–6 дополнительные, дальше наименее выраженные.
-// Роль, которой не дали ни балла, всегда в наименее выраженных.
-function rankRoles(scores) {
-  const codes = Object.keys(ROLES).sort((a, b) => scores[b] - scores[a]);
-  let place = 0;
-  return codes.map((code, i) => {
-    if (i === 0 || scores[code] !== scores[codes[i - 1]]) place = i + 1;
-    const group = scores[code] === 0 ? 2 : place <= 3 ? 0 : place <= 6 ? 1 : 2;
-    return { code, score: scores[code], place, group };
-  });
-}
-
-// Должности подбираются по основным ролям; у проджекта их три, у разработчика две.
-function pickPositions(ranked) {
-  const picked = [];
-  ranked.filter(role => role.group === 0).forEach(({ code }) => {
-    const position = POSITIONS.find(p => p.roles.includes(code));
-    const entry = picked.find(p => p.position === position);
-    if (entry) entry.via.push(code);
-    else picked.push({ position, via: [code] });
-  });
-  return picked;
 }
 
 function render() {
@@ -117,7 +85,7 @@ function renderIntro() {
     <section>
       <p class="eyebrow">Проектная деятельность</p>
       <h1>Командные роли</h1>
-      <p class="lead">Тест по модели Белбина. Показывает, какие роли в&nbsp;команде вам ближе всего и&nbsp;какую работу в&nbsp;проекте стоит взять на&nbsp;себя.</p>
+      <p class="lead">Тест по модели Белбина. Показывает, какие роли в&nbsp;команде вам ближе всего.</p>
 
       <dl class="facts">
         <div><dt>5</dt><dd>блоков</dd></div>
@@ -234,54 +202,32 @@ function updateBlock() {
   document.getElementById('next').disabled = left !== 0;
 }
 
+// Ученик видит только проценты по ролям. Выводы — основные роли и роль в проекте — у учителя.
 function renderResult() {
-  const ranked = rankRoles(scoreRoles());
-  const max = Math.max(...ranked.map(role => role.score));
-  const lead = ranked.filter(role => role.group === 0).map(role => ROLES[role.code].name.toLowerCase());
+  const scores = scoreRoles();
+  const codes = Object.keys(ROLES).sort((a, b) => scores[b] - scores[a]);
+  const max = scores[codes[0]];
 
   app.innerHTML = `
     <section>
       <p class="eyebrow">Результат</p>
       <h1>Ваш профиль</h1>
-      <p class="lead">${lead.length > 1 ? 'Ведущие роли' : 'Ведущая роль'} — ${joinRu(lead)}.</p>
+      <p class="lead">Как ваши ответы распределились между девятью командными ролями.</p>
 
       ${state.group ? '<div class="card team-card" id="team" aria-live="polite"></div>' : ''}
 
       <div class="card profile">
-        ${GROUPS.map((group, g) => {
-          const roles = ranked.filter(role => role.group === g);
-          if (!roles.length) return '';
-          return `
-            <div class="group">
-              <h2 class="group-title">${group.title}</h2>
-              <p class="group-note">${group.note}</p>
-              ${roles.map(role => `
-                <div class="bar-row${g === 0 ? ' is-lead' : ''}">
-                  <span class="bar-place">${role.place}</span>
-                  <div class="bar-name">
-                    <strong>${ROLES[role.code].name}</strong><span class="code">${role.code}</span>
-                    <small>${ROLES[role.code].about}</small>
-                  </div>
-                  <div class="bar-track"><div class="bar" style="width: ${max ? (role.score / max) * 100 : 0}%"></div></div>
-                  <span class="bar-value">${role.score}</span>
-                </div>`).join('')}
-            </div>`;
-        }).join('')}
-      </div>
-      <p class="footnote">Баллы — сумма по пяти блокам, всего 50. Равные баллы делят одно место.</p>
-
-      <h2 class="section-title">Роли в проекте</h2>
-      <p class="section-lead">Подобраны по основным ролям.</p>
-      <ul class="card positions">
-        ${pickPositions(ranked).map(({ position, via }) => `
-          <li>
-            <div>
-              <strong>${position.name}</strong>
-              <small>${position.about}</small>
+        ${codes.map(code => `
+          <div class="bar-row">
+            <div class="bar-name">
+              <strong>${ROLES[code].name}</strong><span class="code">${code}</span>
+              <small>${ROLES[code].about}</small>
             </div>
-            <span class="via">${via.map(code => ROLES[code].name).join(', ')}</span>
-          </li>`).join('')}
-      </ul>
+            <div class="bar-track"><div class="bar" style="width: ${max ? (scores[code] / max) * 100 : 0}%"></div></div>
+            <span class="bar-value">${percent(scores[code])}&nbsp;%</span>
+          </div>`).join('')}
+      </div>
+      <p class="footnote">Процент — доля баллов, которые вы отдали роли за&nbsp;пять блоков: всего 50&nbsp;баллов, один балл — 2&nbsp;%.</p>
 
       <div class="actions">
         <button type="button" class="button" data-action="restart">Пройти заново</button>
@@ -309,10 +255,7 @@ function renderTeam({ status, team }) {
        <h2 class="team-title">Команда ${team.number}</h2>
        <ul class="mates">
          ${team.members.map(member => `
-           <li${member.me ? ' class="is-me"' : ''}>
-             <span>${escapeHtml(member.name)}${member.me ? ' <small>— вы</small>' : ''}</span>
-             <span class="mate-role">${POSITIONS[member.role].name}</span>
-           </li>`).join('')}
+           <li${member.me ? ' class="is-me"' : ''}><span>${escapeHtml(member.name)}${member.me ? ' <small>— вы</small>' : ''}</span></li>`).join('')}
        </ul>`
     : `<p class="team-label">Команда</p><p class="team-status">${TEAM_STATUS[status]}</p>`;
 }

@@ -9,7 +9,6 @@
   --accent: #1d1d1f; /* сайт монохромный: акцент — графит */
   --button-border: #d2d2d7;
   --fill: rgba(118, 118, 128, 0.12);
-  --bar-muted: #c7c7cc;
   --radius: 18px;
   --width: 760px;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", Roboto, Arial, sans-serif;
@@ -233,24 +232,17 @@ h1 {
 
 /* Результат */
 
-.profile { margin-top: 48px; padding: 4px 28px 12px; }
-
-.group { padding: 24px 0 8px; }
-.group + .group { border-top: 1px solid var(--line); }
-.group-title { font-size: 17px; font-weight: 600; }
-.group-note { margin-top: 2px; font-size: 14px; color: var(--text-2); }
+.profile { margin-top: 48px; padding: 8px 28px; }
 
 .bar-row {
   display: grid;
-  grid-template-columns: 20px minmax(0, 15rem) 1fr 28px;
+  grid-template-columns: minmax(0, 15rem) 1fr 48px;
   align-items: center;
   gap: 16px;
   padding: 14px 0;
 }
 
-.group-note + .bar-row { margin-top: 6px; }
-
-.bar-place { font-size: 14px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.bar-row + .bar-row { border-top: 1px solid var(--line); }
 
 .bar-name strong { font-weight: 600; }
 .bar-name small { display: block; margin-top: 2px; font-size: 14px; line-height: 1.35; color: var(--text-2); }
@@ -265,37 +257,19 @@ h1 {
 .bar {
   height: 8px;
   border-radius: 0 4px 4px 0;
-  background: var(--bar-muted);
+  background: var(--accent);
   transform-origin: left;
   animation: bar-grow 0.7s cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
 @keyframes bar-grow { from { transform: scaleX(0); } }
 
-.is-lead .bar { background: var(--accent); }
-
-.bar-value { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.bar-value { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .footnote { margin-top: 12px; padding: 0 28px; font-size: 12px; color: var(--text-3); }
 
 .section-title { margin-top: 72px; font-size: 32px; line-height: 1.125; font-weight: 600; letter-spacing: 0.004em; }
 .section-lead { margin-top: 8px; font-size: 17px; color: var(--text-2); }
-
-.positions { margin-top: 24px; padding-left: 28px; }
-
-.positions li {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 18px 28px 18px 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.positions li:last-child { border-bottom: 0; }
-.positions strong { font-weight: 600; }
-.positions small { display: block; margin-top: 2px; font-size: 14px; color: var(--text-2); }
-.via { flex: none; max-width: 45%; text-align: right; font-size: 14px; color: var(--text-3); }
 
 /* Группа: вход ученика и его команда */
 
@@ -391,6 +365,13 @@ a.list-row { text-decoration: none; }
 .status.is-done { color: var(--accent); }
 
 .notice { margin-top: 16px; font-size: 15px; color: var(--text-2); }
+
+.size-picker { margin-top: 32px; padding: 20px 28px; }
+.size-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.size-control { flex: none; display: flex; align-items: center; gap: 14px; }
+.size-value { font-size: 21px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.size-note { margin-top: 8px; font-size: 14px; color: var(--text-2); }
+.size-picker + .actions { margin-top: 20px; }
 
 .teams {
   margin-top: 24px;
@@ -497,22 +478,18 @@ a.list-row { text-decoration: none; }
 
   .profile { padding-inline: 20px; }
   .bar-row {
-    grid-template-columns: 20px 1fr 28px;
+    grid-template-columns: 1fr 48px;
     grid-template-areas:
-      "place name value"
-      ".     bar  bar";
+      "name value"
+      "bar  bar";
     row-gap: 10px;
   }
-  .bar-place { grid-area: place; }
   .bar-name { grid-area: name; }
   .bar-track { grid-area: bar; }
   .bar-value { grid-area: value; }
 
   .footnote { padding-inline: 20px; }
   .section-title { font-size: 28px; }
-  .positions { padding-left: 20px; }
-  .positions li { flex-direction: column; gap: 6px; padding-right: 20px; }
-  .via { max-width: none; text-align: left; }
 
   .join, .team-card, .invite, .login { padding: 24px; }
   .list-row { padding-left: 20px; }
@@ -521,7 +498,7 @@ a.list-row { text-decoration: none; }
   .code-note { padding-inline: 20px; }
   .invite { grid-template-columns: 1fr; gap: 20px; }
   .qr { max-width: 260px; }
-  .people { padding-inline: 20px; }
+  .people, .size-picker { padding-inline: 20px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

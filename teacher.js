@@ -2,6 +2,7 @@
 
 const STORAGE_KEY = 'team-roles-teacher-v2';
 const POLL_MS = 5000;
+const TEAM_SIZE = { min: 2, max: 6 };
 
 const app = document.getElementById('app');
 
@@ -12,6 +13,7 @@ let teacher = loadTeacher();
 let freshTeacher = false;
 let groups = null;
 let view = null;
+let teamSize = null;
 let problem = null;
 let loginProblem = null;
 let busy = false;
@@ -54,6 +56,7 @@ const notice = () => (problem ? `<p class="notice">${escapeHtml(problem)}</p>` :
 function render() {
   pollRun++;
   view = null;
+  teamSize = null;
   if (!teacher) {
     renderStart();
   } else if (openCode()) {
@@ -71,14 +74,14 @@ function renderStart() {
     <section>
       <p class="eyebrow">Учителю</p>
       <h1>Команды</h1>
-      <p class="lead">Ученики проходят тест, а&nbsp;вы одной кнопкой делите их на&nbsp;команды по&nbsp;трое так, чтобы роли в&nbsp;команде дополняли друг друга.</p>
+      <p class="lead">Ученики проходят тест, а&nbsp;вы одной кнопкой делите их на&nbsp;команды так, чтобы роли в&nbsp;команде дополняли друг друга.</p>
 
       <div class="card rules">
         <h2>Как это работает</h2>
         <ol>
           <li>Вы создаёте группу и&nbsp;показываете QR-код. Ученики сканируют его, вводят имя и&nbsp;проходят тест — 5–7&nbsp;минут.</li>
-          <li>Вы видите, кто уже прошёл. Когда прошли все, нажимаете «Распределить».</li>
-          <li>Каждый видит свою команду у&nbsp;себя на&nbsp;экране. Кто закончит позже, сам попадёт в&nbsp;одну из&nbsp;команд.</li>
+          <li>Вы видите, кто уже прошёл. Когда прошли все, выбираете, сколько человек в&nbsp;команде, и&nbsp;нажимаете «Распределить».</li>
+          <li>Каждый видит свою команду у&nbsp;себя на&nbsp;экране, а&nbsp;роли в&nbsp;проекте — только вы. Кто закончит позже, сам попадёт в&nbsp;одну из&nbsp;команд.</li>
         </ol>
       </div>
 
@@ -213,6 +216,7 @@ function renderLive() {
           </li>`).join('')}
       </ul>` : ''}
 
+    ${done ? renderSizePicker(done) : ''}
     <div class="actions">
       <button type="button" class="button" data-action="distribute"${done && !busy ? '' : ' disabled'}>${view.distributed ? 'Пересобрать команды' : 'Распределить'}</button>
     </div>
@@ -221,10 +225,44 @@ function renderLive() {
     ${view.teams.length ? renderTeams() : ''}`;
 }
 
+// Сколько команд выйдет — так же считает teamCount в gas/Code.js: полные команды, лишние встают
+// в них по одному; если лишних больше, чем команд, — ещё одна команда и деление поровну.
+function teamCount(people, size) {
+  const full = Math.max(1, Math.floor(people / size));
+  return people - full * size > full ? full + 1 : full;
+}
+
+function describeSplit(people, size) {
+  const count = teamCount(people, size);
+  if (count === 1) return `Получится одна команда из&nbsp;${people} ${plural(people, 'человека', 'человек', 'человек')}`;
+  const small = Math.floor(people / count);
+  const bigger = people % count;
+  const teams = `${count} ${plural(count, 'команда', 'команды', 'команд')}`;
+  return `Получится ${teams}${bigger ? `: ${count - bigger} по&nbsp;${small} и&nbsp;${bigger} по&nbsp;${small + 1}` : ` по&nbsp;${small}`}`;
+}
+
+function renderSizePicker(done) {
+  const size = teamSize ?? view.size;
+  return `
+    <div class="card size-picker">
+      <div class="size-row">
+        <span>Человек в&nbsp;команде</span>
+        <div class="size-control">
+          <output class="size-value">${size}</output>
+          <div class="stepper" role="group" aria-label="Человек в команде">
+            <button type="button" data-action="size-dec" aria-label="Меньше"${size > TEAM_SIZE.min && !busy ? '' : ' disabled'}>−</button>
+            <button type="button" data-action="size-inc" aria-label="Больше"${size < TEAM_SIZE.max && !busy ? '' : ' disabled'}>+</button>
+          </div>
+        </div>
+      </div>
+      <p class="size-note">${describeSplit(done, size)}.</p>
+    </div>`;
+}
+
 function renderTeams() {
   return `
     <h2 class="section-title">${view.teams.length} ${plural(view.teams.length, 'команда', 'команды', 'команд')}</h2>
-    <p class="section-lead">Ученики видят свою команду у&nbsp;себя на&nbsp;экране. Кто закончит тест позже, сам попадёт в&nbsp;одну из&nbsp;команд.</p>
+    <p class="section-lead">Ученики видят у&nbsp;себя на&nbsp;экране состав своей команды, роли в&nbsp;проекте — только вы. Кто закончит тест позже, сам попадёт в&nbsp;одну из&nbsp;команд.</p>
     <div class="teams">
       ${view.teams.map(team => `
         <div class="card team">
@@ -324,7 +362,8 @@ app.addEventListener('click', async event => {
       busy = true;
       renderLive();
       try {
-        view = await api('distribute', { code: openCode(), teacher });
+        view = await api('distribute', { code: openCode(), teacher, size: teamSize ?? view.size });
+        teamSize = null;
         problem = null;
       } catch (error) {
         problem = error.message;
@@ -333,6 +372,13 @@ app.addEventListener('click', async event => {
         renderLive();
       }
       break;
+    case 'size-dec':
+    case 'size-inc': {
+      const step = target.dataset.action === 'size-inc' ? 1 : -1;
+      teamSize = Math.min(TEAM_SIZE.max, Math.max(TEAM_SIZE.min, (teamSize ?? view.size) + step));
+      renderLive();
+      break;
+    }
     case 'copy':
       copy(target, studentLink(openCode()), 'Ссылка скопирована');
       break;

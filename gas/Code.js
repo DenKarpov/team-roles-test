@@ -1,5 +1,5 @@
 // Бэкенд групп на Google Apps Script: ученики присылают результаты теста, учитель делит их на команды.
-// Алгоритм команд описан в 07-алгоритм-команд.md: тройки, набор по кругам, остаток — четвёртыми.
+// Алгоритм команд описан в 07-алгоритм-команд.md: команды по N, набор по кругам, остаток — лишними в команды.
 //
 // Протокол: один адрес, POST с JSON в теле ({ action, ... }), ответ { ok: true, data } или
 // { ok: false, status, error }. Apps Script не умеет отдавать коды ответа и не отвечает на
@@ -18,6 +18,8 @@ const ROLE_CODES = ['PL', 'ME', 'IMP', 'RI', 'TW', 'CO', 'SH', 'CF', 'SP'];
 const POSITION_ROLES = [['PL'], ['ME'], ['RI'], ['TW', 'CO', 'SH'], ['IMP', 'SP'], ['CF']];
 
 const TOTAL_POINTS = 50;
+// Сколько человек в команде, выбирает учитель. Больше шести нет смысла: ролей в проекте шесть.
+const TEAM_SIZE = { min: 2, max: 6, default: 3 };
 const KEEP_DAYS = 30;
 const CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 
@@ -25,7 +27,6 @@ const CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 
 // 0 — основные (места 1–3), 1 — дополнительные (4–6), 2 — остальные.
 // Места как в спорте: равные баллы делят одно место. Роль без баллов всегда в последней группе.
-// Так же считает тест в app.js.
 function roleGroups(scores) {
   const codes = ROLE_CODES.slice().sort((a, b) => scores[b] - scores[a]);
   const groups = {};
@@ -82,7 +83,7 @@ function minBy(items, key) {
   return items.reduce((best, item) => (compareKeys(key(item), key(best)) < 0 ? item : best));
 }
 
-// Куда поставить человека сверх троек или опоздавшего: в самую маленькую команду, где он закроет
+// Куда поставить человека сверх полных команд или опоздавшего: в самую маленькую команду, где он закроет
 // больше ролей. Новых команд не открываем — если опоздавших много, учитель пересоберёт команды.
 function lateTeam(teams, member) {
   const smallest = Math.min(...teams.map(team => team.length));
@@ -93,11 +94,19 @@ function lateTeam(teams, member) {
   });
 }
 
-// Тройки набором по кругам: в каждом круге команды выбирают по одному в обратном порядке.
-function buildTeams(members) {
-  const teams = Array.from({ length: Math.max(1, Math.floor(members.length / 3)) }, () => []);
+// Сколько команд по size: полных команд, а лишние встают в них по одному — команды по size и size+1.
+// Если лишних больше, чем команд (маленький класс), заводим ещё одну и делим поровну:
+// 11 человек по 6 — это 6 и 5, а не одна команда из 11. Так же считает предпросмотр в teacher.js.
+function teamCount(people, size) {
+  const full = Math.max(1, Math.floor(people / size));
+  return people - full * size > full ? full + 1 : full;
+}
+
+// Команды набором по кругам: в каждом круге команды выбирают по одному, каждый круг в обратном порядке.
+function buildTeams(members, size) {
+  const teams = Array.from({ length: teamCount(members.length, size) }, () => []);
   const free = members.slice();
-  for (let round = 0; round < 3; round++) {
+  for (let round = 0; round < size; round++) {
     const order = teams.map((_, i) => i);
     if (round % 2) order.reverse();
     for (const t of order) {
@@ -112,8 +121,9 @@ function buildTeams(members) {
 }
 
 // Главная роль каждого в команде — у всех разная, по возможности из основных.
-// Перебор: участников 3–5, ролей 6. Сначала важно, чтобы роли были разные у как можно большего
-// числа людей, потом — чтобы из основных, потом — баллы. Кому разной роли не хватило, достаётся его лучшая.
+// Перебор: ролей 6, поэтому вариантов немного даже в команде из 7–8 человек. Сначала важно, чтобы роли
+// были разные у как можно большего числа людей, потом — чтобы из основных, потом — баллы.
+// Кому разной роли не хватило, достаётся его лучшая.
 function mainRoles(team) {
   let best = { value: -1, roles: [] };
   (function walk(i, used, picked, value) {
@@ -259,6 +269,13 @@ function deleteExpired(all) {
   });
 }
 
+function checkSize(size) {
+  if (!Number.isInteger(size) || size < TEAM_SIZE.min || size > TEAM_SIZE.max) {
+    throw httpError(422, 'В команде — от ' + TEAM_SIZE.min + ' до ' + TEAM_SIZE.max + ' человек');
+  }
+  return size;
+}
+
 function cleanName(value) {
   const name = String(value || '').split(/\s+/).filter(Boolean).join(' ');
   if (name.length < 2 || name.length > 60) throw httpError(422, 'Имя — от 2 до 60 символов');
@@ -323,22 +340,25 @@ const ACTIONS = {
     return {
       code,
       distributed: group.distributed,
+      size: group.size || TEAM_SIZE.default,
       members: members.map(m => ({ id: m.id, name: m.name, finished: !!m.scores, team: m.team || null })),
       teams: describeTeams(finished(members)),
     };
   },
 
-  distribute({ code, teacher }) {
+  // Размер команды запоминается в группе: пересборка по умолчанию берёт его же.
+  distribute({ code, teacher, size }) {
     return withLock(() => {
       const all = readAll();
       const group = loadGroup(all, code);
       checkOwner(group, teacher);
+      const teamSize = size === undefined ? group.size || TEAM_SIZE.default : checkSize(size);
       const members = loadMembers(all, code);
       const done = finished(members);
       if (!done.length) throw httpError(409, 'Пока никто не прошёл тест');
       const teamOf = {};
-      buildTeams(done).forEach((team, i) => team.forEach(m => { teamOf[m.id] = i + 1; }));
-      const updates = { ['g:' + code]: JSON.stringify(Object.assign(group, { distributed: true })) };
+      buildTeams(done, teamSize).forEach((team, i) => team.forEach(m => { teamOf[m.id] = i + 1; }));
+      const updates = { ['g:' + code]: JSON.stringify(Object.assign(group, { distributed: true, size: teamSize })) };
       members.forEach(m => {
         const { id, ...data } = m;
         updates['m:' + code + ':' + id] = JSON.stringify(Object.assign(data, { team: teamOf[id] || null }));
@@ -381,10 +401,13 @@ const ACTIONS = {
     const members = loadMembers(all, code);
     const me = members.find(m => m.id === id);
     if (!me) throw httpError(404, 'Участник не найден');
+    // Ученик видит только состав команды. Роли в проекте — для учителя, ученику их не отдаём.
     let team = null;
     if (me.team) {
-      const described = describeTeams(finished(members))[me.team - 1];
-      team = { number: described.number, members: described.members.map(m => ({ name: m.name, role: m.role, me: m.id === id })) };
+      team = {
+        number: me.team,
+        members: currentTeams(members)[me.team - 1].map(m => ({ name: m.name, me: m.id === id })),
+      };
     }
     return { name: me.name, finished: !!me.scores, distributed: group.distributed, team };
   },

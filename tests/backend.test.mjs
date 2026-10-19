@@ -55,15 +55,27 @@ test('роль в проекте берёт лучшую из своих ком�
   assert.deepEqual(levels[0], { level: 0, score: 0 });  // дизайнер — PL без баллов
 });
 
-test('каждый попадает ровно в одну команду, тройки и четвёрки', () => {
-  for (let n = 1; n <= 40; n++) {
-    const teams = plain(backend.buildTeams(makeMembers(n, n)));
-    assert.deepEqual(teams.flat().map(m => m.id).sort(), Array.from({ length: n }, (_, i) => `id${i}`).sort(), `n=${n}`);
-    assert.equal(teams.length, Math.max(1, Math.floor(n / 3)), `n=${n}`);
-    if (n >= 6) {
+test('сколько команд: полные плюс лишние по одному, в маленьком классе — ещё одна', () => {
+  const cases = [[25, 4, 6], [21, 3, 7], [22, 3, 7], [4, 3, 1], [5, 3, 2], [2, 3, 1], [1, 2, 1], [11, 6, 2], [13, 5, 3], [12, 6, 2]];
+  for (const [people, size, teams] of cases) assert.equal(backend.teamCount(people, size), teams, `${people} по ${size}`);
+});
+
+test('каждый попадает ровно в одну команду, команды по N и N+1', () => {
+  for (let size = 2; size <= 6; size++) {
+    for (let n = 1; n <= 40; n++) {
+      const label = `${n} по ${size}`;
+      const teams = plain(backend.buildTeams(makeMembers(n, n), size));
       const sizes = teams.map(team => team.length);
-      assert.ok(sizes.every(size => size === 3 || size === 4), `n=${n}`);
-      assert.equal(sizes.filter(size => size === 4).length, n % 3, `n=${n}`);
+      assert.deepEqual(teams.flat().map(m => m.id).sort(), Array.from({ length: n }, (_, i) => `id${i}`).sort(), label);
+      assert.equal(teams.length, backend.teamCount(n, size), label);
+      assert.ok(Math.max(...sizes) - Math.min(...sizes) <= 1, label);
+      const full = Math.floor(n / size);
+      if (full && n % size <= full) {
+        assert.ok(sizes.every(s => s === size || s === size + 1), label);
+        assert.equal(sizes.filter(s => s === size + 1).length, n % size, label);
+      } else {
+        assert.ok(Math.max(...sizes) <= size, label);
+      }
     }
   }
 });
@@ -73,7 +85,7 @@ test('набор по кругам закрывает больше ролей, �
   let shuffled = 0;
   for (let seed = 0; seed < 50; seed++) {
     const members = makeMembers(21, seed);
-    drafted += total(backend.buildTeams(members).map(team => total(backend.coverage(team))));
+    drafted += total(backend.buildTeams(members, 3).map(team => total(backend.coverage(team))));
     for (let i = 0; i < 21; i += 3) shuffled += total(backend.coverage(members.slice(i, i + 3)));
   }
   assert.ok(drafted > shuffled, `${drafted} > ${shuffled}`);
@@ -86,7 +98,7 @@ function distinctPossible(options, used = new Set()) {
 
 test('главные роли разные, когда это возможно', () => {
   for (let seed = 0; seed < 30; seed++) {
-    for (const team of backend.buildTeams(makeMembers(12, seed))) {
+    for (const team of backend.buildTeams(makeMembers(12, seed), 3 + (seed % 4))) {
       const roles = plain(backend.mainRoles(team));
       const options = team.map(m => new Set(m.levels.flatMap(({ level }, p) => (level ? [p] : []))));
       assert.equal(roles.length, team.length);
@@ -129,6 +141,8 @@ test('урок целиком', () => {
   const me = call('member', { code, id: ids[0] }).data;
   assert.ok(me.team);
   assert.equal(me.team.members.filter(m => m.me).length, 1);
+  // Роли в проекте видит только учитель.
+  assert.ok(me.team.members.every(m => !('role' in m)), JSON.stringify(me.team));
 
   // Опоздавший сразу попадает в одну из троек.
   assert.ok(call('submit', { code, id: waiting, scores: randomScores(random) }).data.team);
@@ -138,6 +152,33 @@ test('урок целиком', () => {
   // Пересборка учитывает всех.
   view = call('distribute', { code, teacher }).data;
   assert.equal(total(view.teams.map(t => t.members.length)), 11);
+});
+
+test('учитель выбирает, сколько человек в команде', () => {
+  const { call } = loadBackend();
+  const { code, teacher } = call('create').data;
+  const random = rng(11);
+  for (let i = 0; i < 13; i++) joinAndSubmit(call, code, `Ученик ${i}`, randomScores(random));
+  const sizes = view => view.teams.map(t => t.members.length).sort();
+
+  assert.equal(call('teacher', { code, teacher }).data.size, 3);
+  let view = call('distribute', { code, teacher, size: 4 }).data;
+  assert.equal(view.size, 4);
+  assert.deepEqual(sizes(view), [4, 4, 5]);
+
+  // Пересборка без размера берёт прежний.
+  view = call('distribute', { code, teacher }).data;
+  assert.deepEqual(sizes(view), [4, 4, 5]);
+  assert.equal(call('teacher', { code, teacher }).data.size, 4);
+
+  assert.deepEqual(sizes(call('distribute', { code, teacher, size: 6 }).data), [6, 7]);
+  assert.deepEqual(sizes(call('distribute', { code, teacher, size: 2 }).data), [2, 2, 2, 2, 2, 3]);
+
+  for (const size of [1, 7, 3.5, '3', null]) {
+    const result = call('distribute', { code, teacher, size });
+    assert.equal(result.status, 422, `size=${size}`);
+  }
+  assert.equal(call('teacher', { code, teacher }).data.size, 2);
 });
 
 test('опоздавшие сначала заполняют неполные команды, потом расходятся поровну', () => {
